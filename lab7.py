@@ -79,10 +79,12 @@ def dijkstra(graph, start):
 def floyd_warshall(graph, N):
     # ВНИМАНИЕ: Алгоритм O(N^3). На больших N он будет работать вечность.
     # Создаем матрицу смежности
+    parent = [[-1] * N for _ in range(N)]
     dist = [[float('inf')] * N for _ in range(N)]
     for i in range(N):
         dist[i][i] = 0
         for v, w in graph[i].items():
+            parent[v][i] = i
             dist[i][v] = w
 
     iterations = 0
@@ -92,13 +94,14 @@ def floyd_warshall(graph, N):
             for j in range(N):
                 iterations += 1
                 if dist[i][k] + dist[k][j] < dist[i][j]:
+                    parent[i][j] = parent[k][j]
                     dist[i][j] = dist[i][k] + dist[k][j]
 
-    return dist, iterations
+    return dist, parent
 
 
 # Тестируем на самом маленьком графе из задания, чтобы не ждать часами
-N = 1500
+N = 1000
 graph = generate_graph(N)
 
 # --- Блок Дейкстры ---
@@ -116,14 +119,21 @@ while curr != -1:
     curr = parents[curr]
 path.reverse()
 
-print(f"Кратчайший путь от 0 до {target}: {path[:5]} ... {path[-5:]} (показано начало и конец)")
-print(f"Длина пути: {distances[target]}")
+print(f"Кратчайший путь от 0 до {target}: {path}")
+print(f"Длина пути: {sum(path)}")
 
 # --- Блок Флойда-Уоршелла ---
 print("\nЗапускаем алгоритм Флойда-Уоршелла...")
 start_time = time.time()
 _, floyd_iters = floyd_warshall(graph, N)
 print(f"Флойд-Уоршелл отработал за {time.time() - start_time:.4f} сек. Итераций: {floyd_iters}")
+dist_fw, parents_fw = floyd_warshall(graph, N)
+path_floyd = []
+curr = target
+while curr != -1:
+    path_floyd.append(curr)
+    curr = parents_fw[curr]
+path_floyd.reverse()
 
 print("\n--- Сравнение сложности ---")
 print(f"Дейкстра (O(E log V)): ~{dijkstra_iters} итераций внутреннего цикла.")
