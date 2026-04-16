@@ -1,0 +1,206 @@
+import networkx as nx
+import matplotlib.pyplot as plt
+from collections import defaultdict, deque
+
+# Исходные данные: список ребер
+edges = [
+    (3, 4), (3, 5), (3, 8), (3, 12), (4, 6), (4, 15), (5, 6),
+    (5, 7), (5, 10), (5, 14), (5, 16), (6, 8), (6, 13), (6, 17),
+    (7, 8), (7, 12), (8, 9), (8, 11), (8, 15), (8, 16), (9, 12),
+    (10, 12), (11, 12), (11, 17), (12, 14), (13, 14), (13, 16), (15, 17)
+]
+
+
+def make_bipartite(edges):
+    """
+    Раскрашивает граф в два цвета (0 и 1) с помощью BFS.
+    Удаляет ребра, которые нарушают двудольность.
+    """
+    adj = defaultdict(list)
+    for u, v in edges:
+        adj[u].append(v)
+        adj[v].append(u)
+
+    color = {}
+    removed_edges = set()
+    bipartite_edges = set()
+
+    for start_node in adj:
+        if start_node not in color:
+            color[start_node] = 0
+            queue = deque([start_node])
+
+            while queue:
+                curr = queue.popleft()
+                for neighbor in adj[curr]:
+                    if neighbor not in color:
+                        color[neighbor] = 1 - color[curr]
+                        queue.append(neighbor)
+                        # Добавляем ребро, нормализуя порядок вершин, чтобы избежать дублей
+                        bipartite_edges.add(tuple(sorted((curr, neighbor))))
+                    elif color[neighbor] == color[curr]:
+                        # Конфликт цветов! Это ребро нарушает двудольность, удаляем
+                        removed_edges.add(tuple(sorted((curr, neighbor))))
+                    else:
+                        bipartite_edges.add(tuple(sorted((curr, neighbor))))
+
+    # Убираем из нормальных ребер те, что попали в удаленные
+    bipartite_edges = bipartite_edges - removed_edges
+
+    left_part = [node for node, c in color.items() if c == 0]
+    right_part = [node for node, c in color.items() if c == 1]
+
+    return list(bipartite_edges), list(removed_edges), left_part, right_part
+
+
+# --- Б) Алгоритм увеличивающих цепей (Алгоритм Куна) ---
+def kuhn_matching(b_edges, left_part, right_part):
+    adj = defaultdict(list)
+    for u, v in b_edges:
+        if u in right_part: u, v = v, u  # Гарантируем направление L -> R
+        adj[u].append(v)
+
+    match = {}  # кто с кем соединен в правой доле
+
+    def dfs(v, visited):
+        for to in adj[v]:
+            if to in visited:
+                continue
+            visited.add(to)
+            # Если вершина 'to' свободна ИЛИ мы можем найти для её текущего партнера другую пару
+            if to not in match or dfs(match[to], visited):
+                match[to] = v
+                return True
+        return False
+
+    for v in left_part:
+        visited = set()
+        dfs(v, visited)
+
+    matching_edges = [(u, v) for v, u in match.items()]
+    return matching_edges
+
+
+# --- А) Алгоритм Форда-Фалкерсона ---
+def ford_fulkerson_matching(b_edges, left_part, right_part):
+    # Строим сеть: Источник (S) -> Левая доля -> Правая доля -> Сток (T)
+    capacity = defaultdict(int)
+    adj = defaultdict(list)
+
+    S, T = 'Source', 'Sink'
+
+    for u in left_part:
+        adj[S].append(u)
+        adj[u].append(S)
+        capacity[(S, u)] = 1
+
+    for v in right_part:
+        adj[v].append(T)
+        adj[T].append(v)
+        capacity[(v, T)] = 1
+
+    for u, v in b_edges:
+        if u in right_part: u, v = v, u
+        adj[u].append(v)
+        adj[v].append(u)
+        capacity[(u, v)] = 1
+
+    def bfs_path():
+        parent = {}
+        queue = deque([S])
+        while queue:
+            curr = queue.popleft()
+            if curr == T: break
+            for nxt in adj[curr]:
+                if nxt not in parent and capacity[(curr, nxt)] > 0:
+                    parent[nxt] = curr
+                    queue.append(nxt)
+
+        if T not in parent: return None
+
+        path = []
+        curr = T
+        while curr != S:
+            path.append((parent[curr], curr))
+            curr = parent[curr]
+        return path[::-1]
+
+    max_flow = 0
+    while True:
+        path = bfs_path()
+        if not path: break
+        max_flow += 1
+        for u, v in path:
+            capacity[(u, v)] -= 1
+            capacity[(v, u)] += 1
+
+    # Достаем ребра, по которым пошел поток (это и есть паросочетание)
+    matching_edges = []
+    for u in left_part:
+        for v in right_part:
+            if capacity[(u, v)] == 0 and capacity[(v, u)] == 1:
+                matching_edges.append((u, v))
+
+    return matching_edges
+
+
+# --- В) Визуализация ---
+def visualize(b_edges, removed_edges, matching, left_part, right_part):
+    G = nx.Graph()
+    G.add_nodes_from(left_part, bipartite=0)
+    G.add_nodes_from(right_part, bipartite=1)
+    G.add_edges_from(b_edges)
+
+    # Позиции для двудольного графа
+    pos = nx.bipartite_layout(G, left_part)
+
+    plt.figure(figsize=(12, 8))
+
+    # Рисуем узлы
+    nx.draw_networkx_nodes(G, pos, nodelist=left_part, node_color='lightblue', node_size=500, label='Левая доля')
+    nx.draw_networkx_nodes(G, pos, nodelist=right_part, node_color='lightgreen', node_size=500, label='Правая доля')
+    nx.draw_networkx_labels(G, pos)
+
+    # Рисуем обычные ребра
+    nx.draw_networkx_edges(G, pos, edgelist=b_edges, edge_color='gray', alpha=0.5, style='dashed',
+                           label='Допустимые ребра')
+
+    # Рисуем удаленные ребра (для наглядности добавим их в граф)
+    if removed_edges:
+        G_removed = nx.Graph()
+        G_removed.add_edges_from(removed_edges)
+        nx.draw_networkx_edges(G_removed, pos, edge_color='red', style='dotted',
+                               label='Удаленные (нарушали двудольность)')
+
+    # Рисуем паросочетание
+    nx.draw_networkx_edges(G, pos, edgelist=matching, edge_color='blue', width=2.5, label='Паросочетание')
+
+    plt.title("Визуализация наибольшего паросочетания")
+    # plt.legend() # networkx legend иногда ломается, закомментировал
+    plt.axis('off')
+    plt.show()
+
+
+# --- Выполнение программы ---
+print("1. Проверка на двудольность...")
+b_edges, removed_edges, left_part, right_part = make_bipartite(edges)
+
+print(f"   Граф разбит на доли.")
+print(f"   Левая доля: {left_part}")
+print(f"   Правая доля: {right_part}")
+
+if removed_edges:
+    print(f"   Граф НЕ был двудольным. Удалено ребер: {len(removed_edges)}")
+    print(f"   Удаленные ребра: {removed_edges}")
+else:
+    print("   Граф изначально был двудольным.")
+
+print("\n2. Поиск наибольшего паросочетания...")
+match_kuhn = kuhn_matching(b_edges, left_part, right_part)
+print(f"   Результат Куна (увелич. цепи): {len(match_kuhn)} ребер. \n   {match_kuhn}")
+
+match_ford = ford_fulkerson_matching(b_edges, left_part, right_part)
+print(f"   Результат Форда-Фалкерсона: {len(match_ford)} ребер. \n   {match_ford}")
+
+print("\n3. Запуск визуализации...")
+visualize(b_edges, removed_edges, match_kuhn, left_part, right_part)
